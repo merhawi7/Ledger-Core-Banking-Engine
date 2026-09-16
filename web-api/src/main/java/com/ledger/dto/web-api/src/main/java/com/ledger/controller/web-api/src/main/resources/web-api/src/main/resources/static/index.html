@@ -1,0 +1,190 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<title>Ledger — Core Banking Engine (Live API Demo)</title>
+<style>
+  body {
+    font-family: -apple-system, "Segoe UI", Arial, sans-serif;
+    background: linear-gradient(135deg, #ff9a8b 0%, #a18cd1 50%, #6dd5fa 100%);
+    display: flex;
+    justify-content: center;
+    padding: 40px 16px;
+    margin: 0;
+    min-height: 100vh;
+    box-sizing: border-box;
+  }
+  .window {
+    width: 520px;
+    background: #ffffff;
+    border-radius: 12px;
+    box-shadow: 0 20px 50px -20px rgba(0,0,0,0.5);
+    overflow: hidden;
+  }
+  .titlebar {
+    background: linear-gradient(90deg, #7b2ff7 0%, #f107a3 100%);
+    padding: 14px 18px;
+    color: #fff;
+  }
+  .titlebar .title { font-weight: 600; font-size: 15px; }
+  .titlebar .sub { font-size: 11px; opacity: 0.85; margin-top: 2px; }
+  .content { padding: 18px; }
+  .accounts { display: flex; gap: 10px; margin-bottom: 14px; flex-wrap: wrap; }
+  .account {
+    flex: 1; min-width: 140px;
+    border-radius: 10px; padding: 12px; cursor: pointer;
+    border: 2px solid transparent; color: #fff;
+  }
+  .account.checking { background: linear-gradient(160deg, #ff9966, #ff5e62); }
+  .account.savings { background: linear-gradient(160deg, #43e97b, #38f9d7); }
+  .account.selected { border-color: #2c2c2c; }
+  .account .label { font-size: 11px; opacity: 0.85; }
+  .account .name { font-weight: 700; font-size: 14px; }
+  .account .balance { font-weight: 700; font-size: 18px; margin-top: 4px; }
+  .actions { display: flex; gap: 6px; flex-wrap: wrap; margin-bottom: 10px; }
+  .actions button {
+    flex: 1 1 90px; padding: 8px; font-size: 12.5px; border-radius: 8px;
+    border: 1px solid #dbe0e8; background: #fbfcfd; cursor: pointer;
+  }
+  .actions button.active { background: linear-gradient(90deg,#7b2ff7,#f107a3); color: #fff; border-color: transparent; }
+  .panel { display: none; background: #f7f9fb; border: 1px solid #e2e6ec; border-radius: 8px; padding: 10px; margin-bottom: 10px; }
+  .panel.open { display: block; }
+  .panel label { font-size: 12px; color: #666; display: block; margin-bottom: 3px; }
+  .panel input, .panel select {
+    width: 100%; box-sizing: border-box; padding: 6px 8px; font-size: 13px;
+    border: 1px solid #c8c8c8; border-radius: 4px; margin-bottom: 8px;
+  }
+  .panel .run { width: 100%; padding: 8px; background: linear-gradient(90deg,#7b2ff7,#f107a3); color: #fff; border: none; border-radius: 4px; cursor: pointer; }
+  .error { font-size: 11.5px; color: #c0392b; margin-bottom: 6px; }
+  .history { border: 1px solid #d8d8d8; border-radius: 6px; font-family: monospace; font-size: 10.5px; max-height: 140px; overflow-y: auto; }
+  .history div { padding: 5px 8px; border-bottom: 1px solid #eee; }
+  .status-line { font-size: 11px; color: #999; margin-top: 10px; text-align: center; }
+</style>
+</head>
+<body>
+<div class="window">
+  <div class="titlebar">
+    <div class="title">Ledger — Core Banking Engine</div>
+    <div class="sub">Live API demo — every action here hits a real backend, not local mock data</div>
+  </div>
+  <div class="content">
+    <div class="accounts" id="accounts">Loading accounts…</div>
+
+    <div class="actions" id="actionButtons">
+      <button data-action="deposit">Deposit</button>
+      <button data-action="withdraw">Withdraw</button>
+      <button data-action="transfer">Transfer</button>
+      <button data-action="new">New account</button>
+      <button data-action="interest">Apply interest</button>
+    </div>
+
+    <div class="panel" id="panel-deposit">
+      <div class="error" id="err-deposit"></div>
+      <label>Amount</label><input type="number" id="deposit-amount">
+      <label>Note (optional)</label><input type="text" id="deposit-note">
+      <button class="run" onclick="doDeposit()">Deposit</button>
+    </div>
+
+    <div class="panel" id="panel-withdraw">
+      <div class="error" id="err-withdraw"></div>
+      <label>Amount</label><input type="number" id="withdraw-amount">
+      <label>Note (optional)</label><input type="text" id="withdraw-note">
+      <button class="run" onclick="doWithdraw()">Withdraw</button>
+    </div>
+
+    <div class="panel" id="panel-transfer">
+      <div class="error" id="err-transfer"></div>
+      <label>To account</label><select id="transfer-to"></select>
+      <label>Amount</label><input type="number" id="transfer-amount">
+      <label>Note (optional)</label><input type="text" id="transfer-note">
+      <button class="run" onclick="doTransfer()">Transfer</button>
+    </div>
+
+    <div class="panel" id="panel-new">
+      <div class="error" id="err-new"></div>
+      <label>Owner name</label><input type="text" id="new-name">
+      <label>Type</label>
+      <select id="new-type"><option value="checking">Checking</option><option value="savings">Savings</option></select>
+      <label>Opening balance</label><input type="number" id="new-balance">
+      <label>Note (optional)</label><input type="text" id="new-note">
+      <button class="run" onclick="doNewAccount()">Create</button>
+    </div>
+
+    <div style="font-size:12px; color:#666; margin-bottom:4px;">History — <span id="historyOwner"></span></div>
+    <div class="history" id="history"></div>
+    <div class="status-line" id="statusLine"></div>
+  </div>
+</div>
+
+<script>
+const API = ""; // same origin
+let accounts = [];
+let selected = null;
+let openPanel = null;
+
+async function api(path, options) {
+  const res = await fetch(API + path, {
+    headers: { "Content-Type": "application/json" },
+    ...options
+  });
+  const data = await res.json();
+  if (!res.ok) throw new Error(data.error || "Request failed");
+  return data;
+}
+
+async function refreshAccounts() {
+  accounts = await api("/api/accounts");
+  if (!selected && accounts.length) selected = accounts[0].accountNumber;
+  renderAccounts();
+  if (selected) await refreshHistory();
+}
+
+function renderAccounts() {
+  const el = document.getElementById("accounts");
+  el.innerHTML = "";
+  accounts.forEach(acc => {
+    const div = document.createElement("div");
+    div.className = "account " + acc.accountType.toLowerCase() + (acc.accountNumber === selected ? " selected" : "");
+    div.innerHTML = `<div class="label">#${acc.accountNumber} ${acc.accountType}</div>
+                      <div class="name">${acc.ownerName}</div>
+                      <div class="balance">$${acc.balance.toFixed(2)}</div>`;
+    div.onclick = () => { selected = acc.accountNumber; renderAccounts(); refreshHistory(); };
+    el.appendChild(div);
+  });
+
+  const toSelect = document.getElementById("transfer-to");
+  toSelect.innerHTML = accounts
+    .filter(a => a.accountNumber !== selected)
+    .map(a => `<option value="${a.accountNumber}">#${a.accountNumber} - ${a.ownerName}</option>`)
+    .join("");
+}
+
+async function refreshHistory() {
+  const acc = await api("/api/accounts/" + selected);
+  document.getElementById("historyOwner").textContent = acc.ownerName + " · #" + acc.accountNumber;
+  const histEl = document.getElementById("history");
+  histEl.innerHTML = acc.history.length
+    ? acc.history.map(h => `<div>${h}</div>`).join("")
+    : '<div style="color:#999;">No transactions yet</div>';
+}
+
+document.getElementById("actionButtons").addEventListener("click", e => {
+  const btn = e.target.closest("button");
+  if (!btn) return;
+  const action = btn.dataset.action;
+  document.querySelectorAll("#actionButtons button").forEach(b => b.classList.remove("active"));
+  document.querySelectorAll(".panel").forEach(p => p.classList.remove("open"));
+  if (openPanel === action) { openPanel = null; return; }
+  openPanel = action;
+  btn.classList.add("active");
+  const panel = document.getElementById("panel-" + action);
+  if (panel) panel.classList.add("open");
+});
+
+function setError(id, msg) { document.getElementById("err-" + id).textContent = msg || ""; }
+function setStatus(msg) { document.getElementById("statusLine").textContent = msg; setTimeout(() => document.getElementById("statusLine").textContent = "", 3000); }
+
+async function doDeposit() {
+  setError("deposit", "");
+  try {
+    await
